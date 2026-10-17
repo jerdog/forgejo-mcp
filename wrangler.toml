@@ -5,5 +5,5 @@ compatibility_flags = ["nodejs_compat"]
 
 [vars]
 # Set the target instance; put the token in a secret: `wrangler secret put FORGEJO_TOKEN`
-FORGEJO_URL = "https://codeberg.org"
+FORGEJO_URL = "https://codeberg.org"  # optional hosted mode only; local stdio is the default
 FORGEJO_READ_ONLY = "false"

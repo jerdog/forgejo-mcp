@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "forgejo": {
+      "command": "node",
+      "args": ["./node_modules/forgejo-mcp/dist/stdio.js"],
+      "env": {
+        "FORGEJO_URL": "${FORGEJO_URL}",
+        "FORGEJO_TOKEN": "${FORGEJO_TOKEN}",
+        "FORGEJO_READ_ONLY": "true"
+      }
+    }
+  }
+}
