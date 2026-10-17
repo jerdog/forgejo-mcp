@@ -58,11 +58,39 @@ To have the tools in every session of a Claude Code cloud (web) environment, reg
 1. In the session title bar open the cloud environment menu, choose **Edit**, and paste this into **Setup script**:
 
    ```bash
-   export FORGEJO_URL=https://git.example.com
-   curl -fsSL https://raw.githubusercontent.com/jerdog/forgejo-mcp/main/scripts/cloud-setup.sh | bash
+   #!/bin/bash
+   # Cloud environment "Setup script": installs forgejo-mcp and registers it with Claude Code.
+   export FORGEJO_URL=https://git.ontheedgefarms.com
+   REF=main                      # branch or tag of jerdog/forgejo-mcp to install
+   REPO=jerdog/forgejo-mcp
+   DIR=/opt/forgejo-mcp
+   log() { echo "[forgejo-mcp] $*"; }
+
+   fetch() {
+     rm -rf "$DIR"
+     log "try 1: git clone via github.com"
+     git clone -q --depth 1 --branch "$REF" "https://github.com/$REPO" "$DIR" && { log "ok: git clone"; return 0; }
+     rm -rf "$DIR"; mkdir -p "$DIR"
+     log "try 2: tarball via api.github.com"
+     curl -fsSL "https://api.github.com/repos/$REPO/tarball/$REF" | tar -xz --strip-components=1 -C "$DIR" \
+       && [ -f "$DIR/package.json" ] && { log "ok: tarball"; return 0; }
+     if [ -n "${FORGEJO_MCP_GH_TOKEN:-}" ]; then
+       rm -rf "$DIR"
+       log "try 3: git clone with FORGEJO_MCP_GH_TOKEN"
+       git clone -q --depth 1 --branch "$REF" "https://x-access-token:${FORGEJO_MCP_GH_TOKEN}@github.com/$REPO" "$DIR" \
+         && git -C "$DIR" remote set-url origin "https://github.com/$REPO" && { log "ok: token clone"; return 0; }
+     fi
+     return 1
+   }
+
+   fetch || { log "FAILED: could not fetch $REPO@$REF by any route"; exit 1; }
+   bash "$DIR/scripts/cloud-setup.sh" || { log "FAILED: cloud-setup.sh exited $?"; exit 1; }
+   log "done"
    ```
 
-   (For a private fork, paste the contents of [`scripts/cloud-setup.sh`](scripts/cloud-setup.sh) instead.) It clones this repo to `/opt/forgejo-mcp`, builds it, runs `claude mcp add forgejo --scope user`, then runs `--check` so a bad host or token fails the setup visibly.
+   **Private repo:** the setup phase has no session GitHub credentials. If you configured a network secret (Bearer) for GitHub, the proxy supplies auth and try 1 or 2 succeeds; list both `github.com` and `*.github.com` in its allowed domains, since a wildcard may not match the bare host. Otherwise add a fine-grained token (Contents: Read-only, this repo only) as environment variable `FORGEJO_MCP_GH_TOKEN` for try 3. Once the repo is public none of this is needed.
+
+   [`scripts/cloud-setup.sh`](scripts/cloud-setup.sh) builds the server, runs `claude mcp add forgejo --scope user`, then runs `--check` as an informational self-test. A 401 there is expected when the environment injects credentials only inside sessions, so it only warns; confirm authentication from within a session.
 2. Make sure **Network access** allows `github.com` (to clone) and your Forgejo host.
 3. Start a **new session**. MCP servers are read at session start, so existing sessions don't pick it up.
 
@@ -70,8 +98,8 @@ Notes:
 
 - **No token needed if the environment's proxy injects one.** If the environment has a credential configured for your Forgejo host (shown as "inject FORGEJO_TOKEN" in the session's proxy notes), the proxy adds the `Authorization` header to requests it sees, and you can leave `FORGEJO_TOKEN` unset.
 - **`NODE_USE_ENV_PROXY=1` is required.** Node's `fetch` ignores `HTTPS_PROXY` by default (needs Node 22.21+ or 24+), so without it requests bypass the proxy, no credential is injected, and you get `401`. The script sets it on the server. Proxy CA trust (`NODE_EXTRA_CA_CERTS`) is already provided by the environment.
-- If the proxy does not inject a token, set `FORGEJO_TOKEN` as an environment secret and export it before the `curl` line, or create a token as described above.
-- Writes are off by default (`FORGEJO_READ_ONLY=true`). Export `FORGEJO_READ_ONLY=false` before the script to enable write tools.
+- If the proxy does not inject a token, set `FORGEJO_TOKEN` as an environment secret and export it before the `bash /opt/forgejo-mcp/scripts/cloud-setup.sh` line, or create a token as described above.
+- Writes are off by default (`FORGEJO_READ_ONLY=true`). Export `FORGEJO_READ_ONLY=false` before that line to enable write tools; see [Read-only mode](#read-only-mode).
 - Verify in a new session with `/mcp`, or run `NODE_USE_ENV_PROXY=1 FORGEJO_URL=... node /opt/forgejo-mcp/dist/stdio.js --check --repo owner/name`.
 - Alternatively commit a project `.mcp.json` to a repo (see `.mcp.json.example`, adding `"NODE_USE_ENV_PROXY": "1"` to `env`) if you only want the tools in that repo; you still need the setup script step to install the server.
 
@@ -81,7 +109,26 @@ Notes:
 | --- | --- |
 | `FORGEJO_URL` | Base URL of the instance, e.g. `https://git.example.com` (required) |
 | `FORGEJO_TOKEN` | Personal access token. Required for private repos and any write |
-| `FORGEJO_READ_ONLY` | `true` hides every write tool. Recommended until you trust your setup |
+| `FORGEJO_READ_ONLY` | `true` hides every write tool (see [Read-only mode](#read-only-mode)). Recommended until you trust your setup |
+
+## Read-only mode
+
+Set `FORGEJO_READ_ONLY=true` to hide every write tool: the server doesn't register them, so the model can't see or call them (no `create_*`, `update_*`, `delete_*`, `merge_*`, `push_files`, `dispatch_workflow`, and so on). Only the read tools remain. `true`, `1` or `yes` (case-insensitive) turn it on; anything else, or leaving it unset, exposes write tools. The stdio server defaults to writes enabled when the variable is unset, which is why every example here sets it explicitly.
+
+- **It is a server-side switch, not a Forgejo permission.** A token with write scopes is still able to write through anything else that uses it; read-only only limits what this MCP server offers. For a hard limit, also give the token read-only scopes (see below), or rely on a read-only credential.
+- **Changes apply at the next session or restart.** Tools are registered when the server starts, so restart the client (or start a new cloud session) after changing the variable.
+- **Verify** with a tool listing: in read-only mode there is no `create_issue` or `merge_pull_request`.
+
+How to flip it per setup:
+
+| Setup | Read-only | Enable writes |
+| --- | --- | --- |
+| `claude mcp add` | `-e FORGEJO_READ_ONLY=true` | drop the flag, or `-e FORGEJO_READ_ONLY=false` |
+| `.mcp.json` / Claude Desktop | `"FORGEJO_READ_ONLY": "true"` | remove the key or set `"false"` |
+| Cloud environment | leave the setup script as is (`cloud-setup.sh` defaults to `true`) | add `export FORGEJO_READ_ONLY=false` above the `bash "$DIR/scripts/cloud-setup.sh"` line, then start a new session |
+| Cloudflare Worker | set `FORGEJO_READ_ONLY = "true"` in `wrangler.toml` `[vars]` (it ships as `"false"`) and `npm run deploy` | set it to `"false"` and redeploy |
+
+In a cloud environment where the proxy injects the credential, that credential's permissions apply to writes, and it may be an account with broad rights. Consider enabling writes only in a separate environment, or only for the session that needs them.
 
 ## Creating a Forgejo access token
 
