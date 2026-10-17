@@ -59,24 +59,38 @@ To have the tools in every session of a Claude Code cloud (web) environment, reg
 
    ```bash
    #!/bin/bash
-   set -euo pipefail
-   export FORGEJO_URL=https://git.example.com
-   REF=main   # branch or tag of forgejo-mcp to install
-   # FORGEJO_MCP_GH_TOKEN is only needed while the repo is private (see below).
-   AUTH="${FORGEJO_MCP_GH_TOKEN:+x-access-token:$FORGEJO_MCP_GH_TOKEN@}"
-   URL="https://github.com/jerdog/forgejo-mcp"
-   if [ -d /opt/forgejo-mcp/.git ]; then
-     git -C /opt/forgejo-mcp pull --ff-only "https://${AUTH}github.com/jerdog/forgejo-mcp" "$REF"
-   else
-     git clone --depth 1 --branch "$REF" "https://${AUTH}github.com/jerdog/forgejo-mcp" /opt/forgejo-mcp
-     git -C /opt/forgejo-mcp remote set-url origin "$URL"   # don't keep the token in .git/config
-   fi
-   bash /opt/forgejo-mcp/scripts/cloud-setup.sh
+   # Cloud environment "Setup script": installs forgejo-mcp and registers it with Claude Code.
+   export FORGEJO_URL=https://git.ontheedgefarms.com
+   REF=main                      # branch or tag of jerdog/forgejo-mcp to install
+   REPO=jerdog/forgejo-mcp
+   DIR=/opt/forgejo-mcp
+   log() { echo "[forgejo-mcp] $*"; }
+
+   fetch() {
+     rm -rf "$DIR"
+     log "try 1: git clone via github.com"
+     git clone -q --depth 1 --branch "$REF" "https://github.com/$REPO" "$DIR" && { log "ok: git clone"; return 0; }
+     rm -rf "$DIR"; mkdir -p "$DIR"
+     log "try 2: tarball via api.github.com"
+     curl -fsSL "https://api.github.com/repos/$REPO/tarball/$REF" | tar -xz --strip-components=1 -C "$DIR" \
+       && [ -f "$DIR/package.json" ] && { log "ok: tarball"; return 0; }
+     if [ -n "${FORGEJO_MCP_GH_TOKEN:-}" ]; then
+       rm -rf "$DIR"
+       log "try 3: git clone with FORGEJO_MCP_GH_TOKEN"
+       git clone -q --depth 1 --branch "$REF" "https://x-access-token:${FORGEJO_MCP_GH_TOKEN}@github.com/$REPO" "$DIR" \
+         && git -C "$DIR" remote set-url origin "https://github.com/$REPO" && { log "ok: token clone"; return 0; }
+     fi
+     return 1
+   }
+
+   fetch || { log "FAILED: could not fetch $REPO@$REF by any route"; exit 1; }
+   bash "$DIR/scripts/cloud-setup.sh" || { log "FAILED: cloud-setup.sh exited $?"; exit 1; }
+   log "done"
    ```
 
-   **Private repo:** the setup script runs without the session's GitHub credentials, so a private clone fails with `could not read Username`. Create a fine-grained GitHub token limited to this one repository with **Contents: Read-only**, and add it to the environment as a variable named `FORGEJO_MCP_GH_TOKEN` (use the Network secrets / API credentials section if offered). Once the repo is public, remove the variable; the script then clones anonymously.
+   **Private repo:** the setup phase has no session GitHub credentials. If you configured a network secret (Bearer) for GitHub, the proxy supplies auth and try 1 or 2 succeeds; list both `github.com` and `*.github.com` in its allowed domains, since a wildcard may not match the bare host. Otherwise add a fine-grained token (Contents: Read-only, this repo only) as environment variable `FORGEJO_MCP_GH_TOKEN` for try 3. Once the repo is public none of this is needed.
 
-   It uses `git clone` rather than `curl` on `raw.githubusercontent.com`, which cannot authenticate. [`scripts/cloud-setup.sh`](scripts/cloud-setup.sh) builds the server, runs `claude mcp add forgejo --scope user`, then runs `--check` so a bad host or token fails the setup visibly.
+   [`scripts/cloud-setup.sh`](scripts/cloud-setup.sh) builds the server, runs `claude mcp add forgejo --scope user`, then runs `--check` so a bad host or token fails the setup visibly.
 2. Make sure **Network access** allows `github.com` (to clone) and your Forgejo host.
 3. Start a **new session**. MCP servers are read at session start, so existing sessions don't pick it up.
 

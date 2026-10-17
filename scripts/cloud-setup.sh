@@ -19,6 +19,8 @@ REPO="${FORGEJO_MCP_REPO:-https://github.com/jerdog/forgejo-mcp}"
 
 if [ -d "$DIR/.git" ]; then
   git -C "$DIR" pull --ff-only
+elif [ -f "$DIR/package.json" ]; then
+  :   # already unpacked (e.g. from a tarball); nothing to fetch
 else
   git clone --depth 1 "$REPO" "$DIR"
 fi
