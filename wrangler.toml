@@ -1,0 +1,9 @@
+name = "forgejo-mcp"
+main = "src/worker.ts"
+compatibility_date = "2025-06-01"
+compatibility_flags = ["nodejs_compat"]
+
+[vars]
+# Set the target instance; put the token in a secret: `wrangler secret put FORGEJO_TOKEN`
+FORGEJO_URL = "https://codeberg.org"
+FORGEJO_READ_ONLY = "false"
