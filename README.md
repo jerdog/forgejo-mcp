@@ -59,17 +59,24 @@ To have the tools in every session of a Claude Code cloud (web) environment, reg
 
    ```bash
    #!/bin/bash
+   set -euo pipefail
    export FORGEJO_URL=https://git.example.com
    REF=main   # branch or tag of forgejo-mcp to install
+   # FORGEJO_MCP_GH_TOKEN is only needed while the repo is private (see below).
+   AUTH="${FORGEJO_MCP_GH_TOKEN:+x-access-token:$FORGEJO_MCP_GH_TOKEN@}"
+   URL="https://github.com/jerdog/forgejo-mcp"
    if [ -d /opt/forgejo-mcp/.git ]; then
-     git -C /opt/forgejo-mcp pull --ff-only
+     git -C /opt/forgejo-mcp pull --ff-only "https://${AUTH}github.com/jerdog/forgejo-mcp" "$REF"
    else
-     git clone --depth 1 --branch "$REF" https://github.com/jerdog/forgejo-mcp /opt/forgejo-mcp
+     git clone --depth 1 --branch "$REF" "https://${AUTH}github.com/jerdog/forgejo-mcp" /opt/forgejo-mcp
+     git -C /opt/forgejo-mcp remote set-url origin "$URL"   # don't keep the token in .git/config
    fi
    bash /opt/forgejo-mcp/scripts/cloud-setup.sh
    ```
 
-   It uses `git clone` rather than `curl` on `raw.githubusercontent.com` so it works when the repo is private (the environment's GitHub credentials apply to git, not to raw URLs). [`scripts/cloud-setup.sh`](scripts/cloud-setup.sh) builds the server, runs `claude mcp add forgejo --scope user`, then runs `--check` so a bad host or token fails the setup visibly.
+   **Private repo:** the setup script runs without the session's GitHub credentials, so a private clone fails with `could not read Username`. Create a fine-grained GitHub token limited to this one repository with **Contents: Read-only**, and add it to the environment as a variable named `FORGEJO_MCP_GH_TOKEN` (use the Network secrets / API credentials section if offered). Once the repo is public, remove the variable; the script then clones anonymously.
+
+   It uses `git clone` rather than `curl` on `raw.githubusercontent.com`, which cannot authenticate. [`scripts/cloud-setup.sh`](scripts/cloud-setup.sh) builds the server, runs `claude mcp add forgejo --scope user`, then runs `--check` so a bad host or token fails the setup visibly.
 2. Make sure **Network access** allows `github.com` (to clone) and your Forgejo host.
 3. Start a **new session**. MCP servers are read at session start, so existing sessions don't pick it up.
 
@@ -77,8 +84,8 @@ Notes:
 
 - **No token needed if the environment's proxy injects one.** If the environment has a credential configured for your Forgejo host (shown as "inject FORGEJO_TOKEN" in the session's proxy notes), the proxy adds the `Authorization` header to requests it sees, and you can leave `FORGEJO_TOKEN` unset.
 - **`NODE_USE_ENV_PROXY=1` is required.** Node's `fetch` ignores `HTTPS_PROXY` by default (needs Node 22.21+ or 24+), so without it requests bypass the proxy, no credential is injected, and you get `401`. The script sets it on the server. Proxy CA trust (`NODE_EXTRA_CA_CERTS`) is already provided by the environment.
-- If the proxy does not inject a token, set `FORGEJO_TOKEN` as an environment secret and export it before the `curl` line, or create a token as described above.
-- Writes are off by default (`FORGEJO_READ_ONLY=true`). Export `FORGEJO_READ_ONLY=false` before the script to enable write tools.
+- If the proxy does not inject a token, set `FORGEJO_TOKEN` as an environment secret and export it before the `bash /opt/forgejo-mcp/scripts/cloud-setup.sh` line, or create a token as described above.
+- Writes are off by default (`FORGEJO_READ_ONLY=true`). Export `FORGEJO_READ_ONLY=false` before that line to enable write tools.
 - Verify in a new session with `/mcp`, or run `NODE_USE_ENV_PROXY=1 FORGEJO_URL=... node /opt/forgejo-mcp/dist/stdio.js --check --repo owner/name`.
 - Alternatively commit a project `.mcp.json` to a repo (see `.mcp.json.example`, adding `"NODE_USE_ENV_PROXY": "1"` to `env`) if you only want the tools in that repo; you still need the setup script step to install the server.
 
