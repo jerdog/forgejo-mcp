@@ -58,11 +58,18 @@ To have the tools in every session of a Claude Code cloud (web) environment, reg
 1. In the session title bar open the cloud environment menu, choose **Edit**, and paste this into **Setup script**:
 
    ```bash
+   #!/bin/bash
    export FORGEJO_URL=https://git.example.com
-   curl -fsSL https://raw.githubusercontent.com/jerdog/forgejo-mcp/main/scripts/cloud-setup.sh | bash
+   REF=main   # branch or tag of forgejo-mcp to install
+   if [ -d /opt/forgejo-mcp/.git ]; then
+     git -C /opt/forgejo-mcp pull --ff-only
+   else
+     git clone --depth 1 --branch "$REF" https://github.com/jerdog/forgejo-mcp /opt/forgejo-mcp
+   fi
+   bash /opt/forgejo-mcp/scripts/cloud-setup.sh
    ```
 
-   (For a private fork, paste the contents of [`scripts/cloud-setup.sh`](scripts/cloud-setup.sh) instead.) It clones this repo to `/opt/forgejo-mcp`, builds it, runs `claude mcp add forgejo --scope user`, then runs `--check` so a bad host or token fails the setup visibly.
+   It uses `git clone` rather than `curl` on `raw.githubusercontent.com` so it works when the repo is private (the environment's GitHub credentials apply to git, not to raw URLs). [`scripts/cloud-setup.sh`](scripts/cloud-setup.sh) builds the server, runs `claude mcp add forgejo --scope user`, then runs `--check` so a bad host or token fails the setup visibly.
 2. Make sure **Network access** allows `github.com` (to clone) and your Forgejo host.
 3. Start a **new session**. MCP servers are read at session start, so existing sessions don't pick it up.
 
