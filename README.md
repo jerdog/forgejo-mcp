@@ -90,7 +90,7 @@ To have the tools in every session of a Claude Code cloud (web) environment, reg
 
    **Private repo:** the setup phase has no session GitHub credentials. If you configured a network secret (Bearer) for GitHub, the proxy supplies auth and try 1 or 2 succeeds; list both `github.com` and `*.github.com` in its allowed domains, since a wildcard may not match the bare host. Otherwise add a fine-grained token (Contents: Read-only, this repo only) as environment variable `FORGEJO_MCP_GH_TOKEN` for try 3. Once the repo is public none of this is needed.
 
-   [`scripts/cloud-setup.sh`](scripts/cloud-setup.sh) builds the server, runs `claude mcp add forgejo --scope user`, then runs `--check` so a bad host or token fails the setup visibly.
+   [`scripts/cloud-setup.sh`](scripts/cloud-setup.sh) builds the server, runs `claude mcp add forgejo --scope user`, then runs `--check` as an informational self-test. A 401 there is expected when the environment injects credentials only inside sessions, so it only warns; confirm authentication from within a session.
 2. Make sure **Network access** allows `github.com` (to clone) and your Forgejo host.
 3. Start a **new session**. MCP servers are read at session start, so existing sessions don't pick it up.
 
