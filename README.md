@@ -51,6 +51,30 @@ Or commit a project `.mcp.json` (see `.mcp.json.example`; it reads `FORGEJO_URL`
 }
 ```
 
+## Claude Code cloud environments
+
+To have the tools in every session of a Claude Code cloud (web) environment, register the server from the environment's setup script. That covers every repository opened in the environment, so nothing is added to those repos.
+
+1. In the session title bar open the cloud environment menu, choose **Edit**, and paste this into **Setup script**:
+
+   ```bash
+   export FORGEJO_URL=https://git.example.com
+   curl -fsSL https://raw.githubusercontent.com/jerdog/forgejo-mcp/main/scripts/cloud-setup.sh | bash
+   ```
+
+   (For a private fork, paste the contents of [`scripts/cloud-setup.sh`](scripts/cloud-setup.sh) instead.) It clones this repo to `/opt/forgejo-mcp`, builds it, runs `claude mcp add forgejo --scope user`, then runs `--check` so a bad host or token fails the setup visibly.
+2. Make sure **Network access** allows `github.com` (to clone) and your Forgejo host.
+3. Start a **new session**. MCP servers are read at session start, so existing sessions don't pick it up.
+
+Notes:
+
+- **No token needed if the environment's proxy injects one.** If the environment has a credential configured for your Forgejo host (shown as "inject FORGEJO_TOKEN" in the session's proxy notes), the proxy adds the `Authorization` header to requests it sees, and you can leave `FORGEJO_TOKEN` unset.
+- **`NODE_USE_ENV_PROXY=1` is required.** Node's `fetch` ignores `HTTPS_PROXY` by default (needs Node 22.21+ or 24+), so without it requests bypass the proxy, no credential is injected, and you get `401`. The script sets it on the server. Proxy CA trust (`NODE_EXTRA_CA_CERTS`) is already provided by the environment.
+- If the proxy does not inject a token, set `FORGEJO_TOKEN` as an environment secret and export it before the `curl` line, or create a token as described above.
+- Writes are off by default (`FORGEJO_READ_ONLY=true`). Export `FORGEJO_READ_ONLY=false` before the script to enable write tools.
+- Verify in a new session with `/mcp`, or run `NODE_USE_ENV_PROXY=1 FORGEJO_URL=... node /opt/forgejo-mcp/dist/stdio.js --check --repo owner/name`.
+- Alternatively commit a project `.mcp.json` to a repo (see `.mcp.json.example`, adding `"NODE_USE_ENV_PROXY": "1"` to `env`) if you only want the tools in that repo; you still need the setup script step to install the server.
+
 ## Configuration
 
 | Variable | Description |
